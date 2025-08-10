@@ -1,6 +1,13 @@
-# 0.4.2u - Optimization & readability
+# 0.4.3 - Minor refactor
     CHANGES
-    [-] const correctness in the server's use of ports
+    [-] Invalid usernames will no longer exit the program
+    [-] Improved debug logging
+    [-] Improved error handling with the use of runtime_error
+    [-] Implemented a retry loop if messages fail to send, will disconnect on the third failed attempt (out of sync error)
+
+# 0.4.2 - Optimization & readability
+    CHANGES
+    [-] Const correctness in the server's use of ports
     [-] The server now relies more on ClientInfo than the raw file descriptors
 
 # 0.4.1 - Bug fixes & Input improvements

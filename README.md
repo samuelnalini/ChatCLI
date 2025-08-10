@@ -1,47 +1,65 @@
-# CLI Chat App
-*A simple command line chat application*
+# CLIChat
+*Create encrypted group chats, right from your commandline!*
 
 ## ABOUT:
 
-CLI Chat App is a simple command line application that allows encrypted communication between multiple users. It uses a client-server architecture, allowing for scalability and ease of use. Being written in C++, this application is fast and lightweight, making use of low level concepts such as sockets, while also utilizing multithreading for asynchronous operations.
+CLIChat is a command line app that allows users to create and join encrypted group chats. Written in C++, its lightweight design makes it ideal for communication. By making use of the ncurses UI library, it provides a simple to use user interface, right in your terminal! Furthermore; modern concepts, such as multithreading, provide quick execution, and the libsodium library ensures secure encryption for **all** communication.
 
-<sub>*Please see [CONSIDERATIONS](#considerations) before attempting to use this!*</sub>
+<sub>*Please see [CONSIDERATIONS](#considerations)*</sub>
 
 # HELP SECTION:
 
-The project is split up into two separate executables. The server listens to instructions and forwards messages to the clients connected to it.
-The client on the other hand connects to the server and is what users interact with. They are able to input messages which get sent to the server.
+When you first download the project, it is split up into two separate binaries.
+
+The **server** is responsible for accepting user connections, forwarding messages to other clients, and ensuring things like unique usernames.
+
+The **client** is what most users see and interact with. It allows users to connect to a server, provides the user interface, and displays messages.
+
+The sections below will walk you through the installation process.
 
 ## DEPENDENCIES
 
-There are some requirements to run this project.
+In order to run this project, there are a few libraries that are required.
+
+Firstly, you should always ensure your machine is up to date.
 
 ```
 sudo apt update
+```
+
+```
+sudo apt upgrade
+```
+
+You can then move on to installing the required packages.
+
+```
 sudo apt install build-essential cmake curl git unzip pkg-config autoconf automake libtool zip libncurses-dev libsodium-dev
 ```
 
 ## BUILD INSTRUCTIONS
 
-Building the project is a simple process.
+Once you have the required [dependencies](#dependencies), you can move on to downloading and building the project.
 
-First, clone the repo:
+First, clone the repo wherever you'd like:
 
 ```
 git clone --recurse-submodules -j8 https://github.com/samuelnalini/cli-chat-app.git
 ```
 
-Create a build directory
+Create a build directory:
 
 ```
-cd cli-chat-app && mkdir -p build && cd build
+cd CLIChat && mkdir -p build && cd build
 ```
 
-Run:
+Run cmake:
 
 ```
 cmake -G "Unix Makefiles" ..
 ```
+
+And lastly:
 
 ```
 make
@@ -49,6 +67,11 @@ make
 
 *If you have any problems with this part, see the [DEPENDENCIES](#dependencies) section.*
 
+After that, you will see the two binaries:
+
+`server` and `client`
+
+Instructions on how to use them are found below
 
 ### Specifying IP and Port
 
@@ -73,11 +96,14 @@ You can start the server simply by running it as an executable:
 
 (chat-app/build) `./server`
 
-or
+This will start the server on port `8080`
+
+or, if you'd like to specify a port you can run:
 
 (chat-app/build) `./server <ip> <port>`
 
-It will then initialize and begin listening on the specified port.
+
+The server will then initialize and begin listening on the specified port.
 
 ## CLIENT INSTRUCTIONS
 
@@ -89,7 +115,9 @@ You can run the client as an executable:
 
 (chat-app/build) `./client`
 
-or
+This will start the client on `127.0.0.1` on port `8080`.
+
+or if you'd like to specify an IP **and** port (as of right now you must specify both and in this order):
 
 (chat-app/build) `./client <ip> <port>`
 
@@ -99,19 +127,7 @@ It will prompt the user to pick a username and then join the chat.
 
 The client is able to send special commands to the server by prefixing them with `/`
 
-As of right now, there is only the `/exit` command, which will exit the server.
-
-Not very exciting, but more commands will be added in the future.
-
-# BRANCHES
-
-There are three main branches you can pick from.
-
-`main` is the most stable branch and is *recommended*
-
-`nightly` is an unstable release that often has the latest features *unstable*
-
-`dev` is the most recent development version, which is often broken and full of bugs *not recommended*
+`/exit` - disconnects the client gracefully
 
 ### CONSIDERATIONS:
 
@@ -131,3 +147,4 @@ There are three main branches you can pick from.
   - epoll() and event-based systems.
   - Debugging skills
   - Development in Linux
+  - Error handling through the use of try/catch blocks, exception handling
