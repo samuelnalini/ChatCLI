@@ -17,7 +17,7 @@
 class Server
 {
 public:
-    Server(uint16_t port = 8080);
+    Server(const uint16_t port);
     ~Server();
 
     void Start();
@@ -26,11 +26,12 @@ public:
 private:
     struct ClientInfo
     {
-        std::unique_ptr<NetworkSession> session;
         std::string username;
+        std::unique_ptr<NetworkSession> session;
+        unsigned char client_pk[crypto_box_PUBLICKEYBYTES];
+        int fd;
         bool registered{ false };
         bool key_exchanged{ false };
-        unsigned char client_pk[crypto_box_PUBLICKEYBYTES];
     };
 
     std::unordered_map<int, ClientInfo> m_clients;
@@ -40,7 +41,7 @@ private:
     int m_listenfd{ -1 };
     int m_epollfd{ -1 };
 
-    uint16_t m_port;
+    const uint16_t m_port;
 
     bool m_running{ false };
 
@@ -53,8 +54,8 @@ private:
     void SetNonBlocking(int fd);
     void EventLoop();
     void HandleNewConnection();
-    void HandleClientEvent(int fd, uint32_t events);
+    void HandleClientEvent(ClientInfo& client, uint32_t events);
     void BroadcastEncrypted(const std::string& msg);
-    void DisconnectClient(int fd);
+    void DisconnectClient(ClientInfo& client);
     bool SendSecretbox(NetworkSession* sess, const std::string& msg);
 };

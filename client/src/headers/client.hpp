@@ -47,6 +47,8 @@ private:
     bool CreateSession();
     void CloseSession();
 
+    bool ChangeUsername();
+
     bool SendEncrypted(const std::string& plaintext);
     std::optional<std::string> RecvDecrypted();
 

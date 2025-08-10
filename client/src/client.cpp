@@ -29,6 +29,74 @@ Client::~Client()
     }
 };
 
+bool Client::ChangeUsername()
+{
+    try
+    {
+        bool valid{ false };
+
+        while (!valid)
+        {
+            auto usernameOpt{ m_ui.PromptInput("Username: ") };
+
+            if (!usernameOpt.has_value() || usernameOpt->empty())
+            {
+                continue;
+            }
+
+            if (usernameOpt->length() > MAX_USERNAME_LEN)
+            {
+                m_ui.PushPriorityMessage("Username too long, try again");
+                continue;
+            }
+
+            const std::string username{ *usernameOpt };
+
+            if (username == "/exit")
+            {
+                throw std::runtime_error("User quit");
+            }
+
+            if (!SendEncrypted(username))
+            {
+                Debug::Log("Invalid username " + username);
+                throw std::runtime_error("Failed to send username");
+            }
+            
+            auto response = RecvDecrypted();
+            
+            if (!response)
+            {
+                Debug::Log("Failed to receive response -> Recovering", Debug::LOG_LEVEL::WARNING);
+                m_ui.PushPriorityMessage("An error has occurred, please try again");
+                continue;
+            }
+
+            if (response == "SERVER::USERNAME_TAKEN")
+            {
+                m_ui.PushPriorityMessage("User '" + username + "' already exists");
+                continue;
+            }
+            else if (response == "SERVER::USERNAME_INVALID")
+            {
+                m_ui.PushPriorityMessage("Invalid username, please try again");
+                continue;
+            }
+
+            m_username = username;
+            valid = true;
+            break;
+        }
+    }
+    catch (std::exception& e)
+    {
+        Debug::Log(e.what(), Debug::LOG_LEVEL::ERROR);
+        return false; 
+    }
+
+    return true;
+}
+
 void Client::Start()
 {
     if (m_running)
@@ -38,8 +106,7 @@ void Client::Start()
     {
         if (!CreateSession())
         {
-            Debug::Log("Failed to create session -> stopping", Debug::LOG_LEVEL::ERROR);
-            std::cout << "Failed to create session, stopping\n";
+            throw std::runtime_error("Failed to create session -> stopping");
             exit(1);
         }
        
@@ -53,18 +120,21 @@ void Client::Start()
         crypto_box_keypair(m_client_pk, m_client_sk);
 
         // Send PK
-        m_session->SendPacket(std::string((char*) m_client_pk, crypto_box_PUBLICKEYBYTES));
+        if (!m_session->SendPacket(std::string((char*) m_client_pk, crypto_box_PUBLICKEYBYTES)))
+        {
+            throw std::runtime_error("Bad handshake -> stopping");
+        }
 
         // Receive server PK
-        auto srvpkPkt{ m_session->RecvPacket().value() };
+        auto srvpkPkt = m_session->RecvPacket().value();
         memcpy(m_server_pk, srvpkPkt.data(), crypto_box_PUBLICKEYBYTES);
 
         // Receive encrypted group key
-        auto grpPkt{ m_session->RecvPacket().value() };
+        auto grpPkt = m_session->RecvPacket().value();
         
-        const unsigned char* nonce{ (unsigned char*) grpPkt.data() };
-        const unsigned char* ct{ nonce + crypto_box_NONCEBYTES };
-        size_t ctLen{ grpPkt.size() - crypto_box_NONCEBYTES };
+        const unsigned char* nonce = (unsigned char*) grpPkt.data();
+        const unsigned char* ct = nonce + crypto_box_NONCEBYTES;
+        size_t ctLen = grpPkt.size() - crypto_box_NONCEBYTES;
 
         if (crypto_box_open_easy(
             m_group_key,
@@ -75,42 +145,31 @@ void Client::Start()
             m_client_sk
         ) != 0)
         {
-            throw std::runtime_error("Failed to decrypt group key");
+            throw std::runtime_error("Invalid group key -> stopping");
         }
 
         // Username
 
-        auto usernameOpt{ m_ui.PromptInput("Username: ") };
-
-        if (!usernameOpt.has_value() || usernameOpt->empty() || usernameOpt->length() > MAX_USERNAME_LEN)
+        if(!ChangeUsername())
         {
-            std::string logStr{ "Invalid username " + *usernameOpt };
-            throw std::runtime_error("Invalid username");
+            throw std::runtime_error("Failed to set username. See logs for details.");
         }
 
-        const std::string username{ *usernameOpt };
-        
-        if (!SendEncrypted(username))
-        {
-            std::string logStr{ "Invalid username " + username };
-            throw std::runtime_error("Failed to send username");
-        }
-
-        m_username = username;
         m_running = true;
 
     } catch (const std::exception& e)
     {
         m_exitReason = e.what();
-        Debug::Log(std::string("Startup exception: ") + e.what());
+        Debug::Log(std::string("Startup exception: ") + e.what(), Debug::LOG_LEVEL::ERROR);
         if (m_uiActive)
             m_ui.Cleanup();
 
-        CloseSession();
+        Stop(true);
+        //CloseSession();
 
-        Debug::DumpToFile("log.txt");
-        std::cerr << "Error: " << e.what() << '\n';
-        std::exit(1);
+        //Debug::DumpToFile("log.txt");
+        //std::cerr << "Error: " << e.what() << '\n';
+        exit(1);
 
     }
 
@@ -120,19 +179,22 @@ void Client::Start()
 
     auto safe = [&](auto fn){
         return std::thread([this, fn](){
-                try{
+                try
+                {
                     (this->*fn)();
-                } catch (const std::exception& e)
+                }
+                catch (const std::exception& e)
                 {
                     Debug::Log((std::string("Exception in thread: ") + e.what()).c_str());
                     Stop(true);
-                } catch (...)
+                }
+                catch (...)
                 {
                     Debug::Log("Unknown exception in thread, stopping");
                     Stop(true);
                 }
-                }
-                );
+            }
+        );
     };
 
     m_threadPool.emplace_back(safe(&Client::HandleBroadcast));
@@ -169,8 +231,6 @@ void Client::Stop(bool dumpLog)
         return;
     }
 
-    Debug::Log("Stop called");
-
     m_stopping = true;
     m_running = false;
     m_ui.running = false;
@@ -189,7 +249,7 @@ bool Client::CreateSession()
 
         if (fd < 0)
         {
-            throw std::runtime_error("Socket creation failed");
+            throw std::runtime_error(strerror(errno));
             return false;
         }
 
@@ -207,12 +267,13 @@ bool Client::CreateSession()
 
         if (connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof addr) < 0)
         {
-            throw std::runtime_error("Connection failed");
+            throw std::runtime_error(strerror(errno));
         }
 
         m_session = std::make_unique<NetworkSession>(fd);
         return true;
-    } catch (const std::runtime_error& e)
+    }
+    catch (const std::runtime_error& e)
     {
         Debug::Log(e.what());
         m_exitReason = e.what();
@@ -346,13 +407,13 @@ void Client::HandleBroadcast()
         }
 
         const auto& msg{ *msgOpt };
-        if (msg == "SERVER::USERNAME_TAKEN")
+        /*if (msg == "SERVER::USERNAME_TAKEN")
         {
             std::string logStr{ "Username " + m_username + " is already taken" };
             m_exitReason = logStr;
             Stop();
             break;
-        }
+        }*/
 
         m_ui.PushMessage(msg);
     }

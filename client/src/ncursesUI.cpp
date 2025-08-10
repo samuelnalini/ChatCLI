@@ -52,7 +52,7 @@ void NcursesUI::Cleanup()
     running = false;
     Debug::Log("Started UI cleanup procedure");
 
-    FlushInput();
+    //FlushInput();
 
     if (m_msgWin)
     {
@@ -107,10 +107,30 @@ std::wstring from_utf8(const std::string& str)
 void NcursesUI::PushMessage(const std::string& msg)
 {
     if (!running)
+    {
+        Debug::Log("Attempted to push message without UI -> dropping", Debug::LOG_LEVEL::WARNING);
         return;
+    }
 
     std::lock_guard<std::mutex> lock(m_queueMutex);
     m_msgQueue.push(msg);
+}
+
+void NcursesUI::PushPriorityMessage(const std::string& msg)
+{
+    if (!running)
+    {
+        Debug::Log("Attempted to push message without UI -> dropping", Debug::LOG_LEVEL::WARNING);
+        return;
+    }
+
+    std::wstring wmsg{ from_utf8(msg) };
+    wmsg.push_back(L'\n');
+
+    mvwaddwstr(m_msgWin, getcury(m_msgWin), 0, wmsg.c_str());
+
+    wrefresh(m_msgWin);
+    wrefresh(m_inputWin);
 }
 
 void NcursesUI::PrintBufferedMessages()
@@ -133,6 +153,7 @@ void NcursesUI::PrintBufferedMessages()
 
         mvwaddwstr(m_msgWin, getcury(m_msgWin), 0, wmsg.c_str());
         printed = true;
+        Debug::Log("Printed message " + msg);
     }
 
     if (printed)
