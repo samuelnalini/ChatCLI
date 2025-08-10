@@ -15,12 +15,13 @@
 #include <stdint.h>
 #include <errno.h>
 #include <sys/epoll.h>
-#include <arpa/inet.h>
 #include <fcntl.h>
 #include <string.h>
 #include <vector>
+#include <netinet/tcp.h>
+#include <cstring>
 
-constexpr int MAX_EXENTS{ 64 };
+constexpr int MAX_EVENTS{ 64 };
 
 Server::Server(const uint16_t port)
     : m_port(port)
@@ -43,7 +44,17 @@ Server::~Server()
 void Server::SetNonBlocking(int fd)
 {
     int flags{ fcntl(fd, F_GETFL, 0) };
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+    if (flags == -1)
+    {
+        Debug::Log(std::string("fcntl(F_GETFL) failed: ") + strerror(errno), Debug::LOG_LEVEL::ERROR);
+        return;
+    }
+
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1)
+    {
+        Debug::Log(std::string("fcntl(F_SETFL) failed: ") + strerror(errno), Debug::LOG_LEVEL::ERROR);
+    }
 }
 
 void Server::SetupListener()
@@ -88,17 +99,25 @@ void Server::SetupListener()
 
         std::cout << "==> Setting up epoll... ";
         m_epollfd = epoll_create1(0);
+
         if (m_epollfd < 0)
         {
             Debug::Log(strerror(errno), Debug::LOG_LEVEL::ERROR);
             perror("epoll_create1()");
             Stop(true);
+            return;
         }
 
         epoll_event ev;
         ev.events = EPOLLIN;
         ev.data.fd = m_listenfd;
-        epoll_ctl(m_epollfd, EPOLL_CTL_ADD, m_listenfd, &ev);
+        if (epoll_ctl(m_epollfd, EPOLL_CTL_ADD, m_listenfd, &ev) < 0) 
+        {
+            Debug::Log(std::string("epoll_ctl ADD listenfd failed: ") + strerror(errno));
+            perror("epoll_ctl()");
+            Stop(true);
+            return;
+        }
 
         std::cout << Style::style("PASS\n", {Style::STYLE_TYPE::GREEN, Style::STYLE_TYPE::BOLD});
     }
@@ -107,16 +126,15 @@ void Server::SetupListener()
         Debug::Log(strerror(errno), Debug::LOG_LEVEL::ERROR);
         std::cerr << "Exception thrown -> see logs for details\n";
 
-        if (m_listenfd)
+        if (m_listenfd != -1)
         {
             shutdown(m_listenfd, SHUT_RDWR); 
             close(m_listenfd);
             m_listenfd = -1;
         }
 
-        if (m_epollfd)
+        if (m_epollfd != -1)
         {
-            shutdown(m_epollfd, SHUT_RDWR);
             close(m_epollfd);
             m_epollfd = -1;
         }
@@ -124,6 +142,8 @@ void Server::SetupListener()
         Stop(true);
     }
 }
+
+
 
 void Server::Start()
 {
@@ -136,6 +156,8 @@ void Server::Start()
     SetupListener();
     EventLoop();
 }
+
+
 
 void Server::Stop(bool dumpLog)
 {
@@ -160,33 +182,39 @@ void Server::Stop(bool dumpLog)
     if (m_epollfd != -1)
     {
         std::cout << "Stopping event handler...\n";
-        shutdown(m_epollfd, SHUT_RDWR);
         close(m_epollfd);
         m_epollfd = -1;
         Debug::Log("Event handler stopped");
         std::cout << "==> Event handler stopped\n";
     }
 
-    m_clients.clear();
-    m_usernames.clear();
+    sodium_memzero(m_server_sk, sizeof m_server_sk);
+    sodium_memzero(m_group_key, sizeof m_group_key);
+
+    {
+        std::lock_guard<std::mutex> lock(m_clientsMutex);
+        m_clients.clear();
+        m_usernames.clear();
+    }
 
     if (dumpLog)
         Debug::DumpToFile("serverlog.txt");
 }
 
+
+
 void Server::EventLoop()
 {
-    epoll_event events[MAX_EXENTS];
+    epoll_event events[MAX_EVENTS];
    
     std::cout << Style::green("Server started\n");
-    std::cout << "Running on port ";
-    std::cout << Style::yellow(std::to_string(m_port) + '\n');
+    std::cout << "Running on port " << m_port << '\n';
 
-    std::cout << Style::strikethrough("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+    std::cout << Style::strikethrough("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~") << '\n';
 
     while (m_running)
     {
-        int n = epoll_wait(m_epollfd, events, MAX_EXENTS, -1);
+        int n = epoll_wait(m_epollfd, events, MAX_EVENTS, -1);
 
         if (n < 0)
         {
@@ -204,16 +232,25 @@ void Server::EventLoop()
                 HandleNewConnection();
             else
             {
+                std::unique_lock<std::mutex> lock(m_clientsMutex);
                 auto it = m_clients.find(fd);
 
                 if (it == m_clients.end())
-                    return;
+                {
+                    lock.unlock();
+                    continue;
+                }
 
-                HandleClientEvent(it->second, events[i].events);
+                ClientInfo& clientRef = it->second;
+                lock.unlock();
+
+                HandleClientEvent(clientRef, events[i].events);
             }
         }
     }
 }
+
+
 
 void Server::HandleNewConnection()
 {
@@ -230,6 +267,15 @@ void Server::HandleNewConnection()
                 throw std::runtime_error(strerror(errno));
                 return;
             }
+        }
+
+        SetNonBlocking(clientfd);
+        
+        int flag{ 1 };
+        
+        if (setsockopt(clientfd, IPPROTO_TCP, TCP_NODELAY, (char*) &flag, sizeof(int)) < 0)
+        {
+            Debug::Log(std::string("setsockopt TCP_NODELAY failed: ") + strerror(errno), Debug::LOG_LEVEL::ERROR);
         }
 
         epoll_event ev{ EPOLLIN, {
@@ -253,6 +299,8 @@ void Server::HandleNewConnection()
         return;
     }
 }
+
+
 
 void Server::DisconnectClient(ClientInfo& client)
 {
@@ -283,6 +331,8 @@ void Server::DisconnectClient(ClientInfo& client)
         std::cout << user + " has " + Style::red("disconnected\n");
     }
 }
+
+
 
 void Server::HandleClientEvent(ClientInfo& client, uint32_t events)
 {
@@ -420,6 +470,7 @@ void Server::HandleClientEvent(ClientInfo& client, uint32_t events)
 }
 
 
+
 bool Server::SendSecretbox(NetworkSession* sess, const std::string& msg)
 {
     unsigned char nonce[crypto_secretbox_NONCEBYTES];
@@ -450,6 +501,8 @@ bool Server::SendSecretbox(NetworkSession* sess, const std::string& msg)
 
     return true;
 }
+
+
 
 void Server::BroadcastEncrypted(const std::string& msg)
 {
