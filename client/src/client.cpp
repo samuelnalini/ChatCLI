@@ -119,7 +119,6 @@ void Client::Start()
 
         crypto_box_keypair(m_client_pk, m_client_sk);
 
-        // Send PK
         if (!m_session->SendPacket(std::string((char*) m_client_pk, crypto_box_PUBLICKEYBYTES)))
         {
             throw std::runtime_error("Bad handshake -> stopping");
@@ -240,11 +239,9 @@ void Client::Stop(bool)
     m_ui.running = false;
     m_uiActive = false;
 
-    Debug::Log("Closing session...");
     CloseSession();
     Debug::Log("Session closed");
    
-    Debug::Log("Clearing keys...");
     sodium_memzero(m_client_sk, sizeof m_client_sk);
     sodium_memzero(m_client_pk, sizeof m_client_pk);
     sodium_memzero(m_server_pk, sizeof m_server_pk);

@@ -101,9 +101,9 @@ This will start the client on `127.0.0.1` on port `8080`
 
 or if you'd like to specify an IP and port:
 
-(chat-app/build) `./client <ip> <port>` (must specify both and in this order)
+(chat-app/build) `./client -i/--ip <ip> -p/--port <port>`
 
-It will prompt the user to pick a username and then join the chat.
+You can specify one or the other, if you don't it'll use the aforementioned defaults
 
 ## CLIENT COMMANDS
 
@@ -130,3 +130,4 @@ The client is able to send special commands to the server by prefixing them with
   - Debugging skills
   - Development in Linux
   - Error handling through the use of try/catch blocks, exception handling
+  - Some regex magic

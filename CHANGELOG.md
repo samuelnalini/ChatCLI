@@ -1,3 +1,12 @@
+# 0.4.3b - Quality of life
+    OPTIMIZATIONS
+    [-] Completely removed deprecated send_all and recv_all to save some memory
+
+    IMPROVEMENTS
+    [-] When starting the client, you can now specify -p/--port and -i/--ip. There is no longer a specific order and you no longer need to specify both
+    [-] IP and port are now checked for invalid arguments, improving safety.
+
+
 # 0.4.3a - Refactor continued
     OPTIMIZATIONS
     [-] SendPacket and RecvPacket rewritten to use iov instead of strings, reducing the amount of copies
