@@ -165,10 +165,6 @@ void Client::Start()
             m_ui.Cleanup();
 
         Stop(true);
-        //CloseSession();
-
-        //Debug::DumpToFile("log.txt");
-        //std::cerr << "Error: " << e.what() << '\n';
         exit(1);
 
     }
@@ -198,47 +194,62 @@ void Client::Start()
     };
 
     m_threadPool.emplace_back(safe(&Client::HandleBroadcast));
-    m_threadPool.emplace_back(safe(&Client::ClientLoop));
     m_threadPool.emplace_back(safe(&Client::UIUpdateLoop));
 
     Debug::Log("Threads started");
 
+    ClientLoop();
+
+    Debug::Log("Joining threads...");
+
+    int count{ 0 };
     for (auto &thr : m_threadPool)
     {
         if (thr.joinable())
+        {
             thr.join();
+            Debug::Log("==> Thread " + std::to_string(count) + " joined");
+            count++;
+        }
     }
 
-    Debug::Log("Threads stopped");
+    Debug::Log("Thread cleanup complete");
 
     m_ui.Cleanup();
-
-    Debug::Log("UI cleanup procedure completed");
+    Debug::Log("UI cleanup complete");
 
     if (m_exitReason != "None")
     {
-
         Debug::Log("Client exited: " + m_exitReason, Debug::LOG_LEVEL::INFO);
         Debug::DumpToFile("log.txt");
         std::cout << "Exited: " << m_exitReason << '\n';
     }
 }
 
-void Client::Stop(bool dumpLog)
+void Client::Stop(bool)
 {
     if (m_stopping)
     {
         return;
     }
 
+    Debug::Log("Initiating shutdown");
+
     m_stopping = true;
     m_running = false;
     m_ui.running = false;
     m_uiActive = false;
 
+    Debug::Log("Closing session...");
     CloseSession();
-
     Debug::Log("Session closed");
+   
+    Debug::Log("Clearing keys...");
+    sodium_memzero(m_client_sk, sizeof m_client_sk);
+    sodium_memzero(m_client_pk, sizeof m_client_pk);
+    sodium_memzero(m_server_pk, sizeof m_server_pk);
+    sodium_memzero(m_group_key, sizeof m_group_key);
+    Debug::Log("Keys cleared");
 }
 
 bool Client::CreateSession()
@@ -249,7 +260,7 @@ bool Client::CreateSession()
 
         if (fd < 0)
         {
-            throw std::runtime_error(strerror(errno));
+            throw std::runtime_error(std::string("Socket creation failed: ") + strerror(errno));
             return false;
         }
 
@@ -261,13 +272,12 @@ bool Client::CreateSession()
 
         if (inet_pton(AF_INET, m_ip.c_str(), &addr.sin_addr) <= 0)
         {
-            std::string logStr{ "Invalid IP address: " + m_ip };
-            throw std::runtime_error(logStr);    
+            throw std::runtime_error("Invalid IP address" + m_ip);    
         }
 
         if (connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof addr) < 0)
         {
-            throw std::runtime_error(strerror(errno));
+            throw std::runtime_error(std::string("Connect failed: ") + strerror(errno));
         }
 
         m_session = std::make_unique<NetworkSession>(fd);
@@ -315,7 +325,7 @@ bool Client::SendEncrypted(const std::string& plaintext)
 
 std::optional<std::string> Client::RecvDecrypted()
 {
-    auto encOpt{ m_session->RecvPacket() };
+    auto encOpt = m_session->RecvPacket();
 
     if (!encOpt)
         return std::nullopt;
@@ -359,7 +369,7 @@ void Client::ClientLoop()
 
    while (m_running)
    {
-        auto inputOpt{ m_ui.PromptInput(m_username + prompt) };
+        auto inputOpt = m_ui.PromptInput(m_username + prompt);
 
         if (!inputOpt.has_value())
             break;
@@ -370,7 +380,6 @@ void Client::ClientLoop()
 
         if (input == "/exit")
         {
-            Stop();
             break;
         }
 
@@ -407,13 +416,6 @@ void Client::HandleBroadcast()
         }
 
         const auto& msg{ *msgOpt };
-        /*if (msg == "SERVER::USERNAME_TAKEN")
-        {
-            std::string logStr{ "Username " + m_username + " is already taken" };
-            m_exitReason = logStr;
-            Stop();
-            break;
-        }*/
 
         m_ui.PushMessage(msg);
     }

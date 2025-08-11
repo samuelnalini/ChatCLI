@@ -2,9 +2,11 @@
 
 #include <arpa/inet.h>
 #include <cstdint>
+#include <optional>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <string.h>
+#include <sys/uio.h>
+#include <vector>
 
 NetworkSession::NetworkSession(int socketfd)
     : m_socketfd(socketfd)
@@ -14,56 +16,90 @@ NetworkSession::~NetworkSession() = default;
 
 bool NetworkSession::SendPacket(const std::string& data)
 {
-    uint32_t len{ static_cast<uint32_t>(data.size()) };
-    uint32_t netLen{ htonl(len) };
-
-    std::string buffer(sizeof netLen + data.size(), '\0');
-
-    memcpy(buffer.data(), &netLen, sizeof netLen);
-    memcpy(buffer.data() + sizeof netLen, data.data(), data.size());
-
-    if (send_all(m_socketfd, buffer.data(), buffer.size(), 0) < 0)
+    if (m_socketfd < 0)
         return false;
+
+    uint32_t len = static_cast<uint32_t>(data.size());
+    uint32_t netLen = htonl(len);
+
+    
+    iovec iov[2];
+    iov[0].iov_base = &netLen;
+    iov[0].iov_len = PACKET_HEADER_SIZE;
+
+    iov[1].iov_base = const_cast<char*>(data.data());
+    iov[1].iov_len = len;
+
+    size_t totalLen{ PACKET_HEADER_SIZE + len };
+    size_t sent{ 0 };
+
+    while (sent < totalLen)
+    {
+        ssize_t n = writev(m_socketfd, iov, 2);
+
+        if (n < 0)
+        {
+            if (errno == EINTR)
+                continue;
+
+            return false;
+        }
+
+        sent += static_cast<size_t>(n);
+
+        size_t remaining = n;
+
+        for (int i{ 0 }; i < 2 && remaining > 0; ++i)
+        {
+            if (remaining >= iov[i].iov_len)
+            {
+                remaining -= iov[i].iov_len;
+                iov[i].iov_base = static_cast<char*>(iov[i].iov_base) + iov[i].iov_len;
+                iov[i].iov_len = 0;
+            }
+            else
+            {
+                iov[i].iov_base = static_cast<char*>(iov[i].iov_base) + remaining;
+                iov[i].iov_len -= remaining;
+                remaining = 0;
+            }
+        }
+    }
 
     return true;
 }
 
+
+
 std::optional<std::string> NetworkSession::RecvPacket()
 {
-    // Length header
+
+    if (m_socketfd < 0)
+        return std::nullopt;
+
     uint32_t netLen{ 0 };
-    ssize_t received{ recv_all(m_socketfd, reinterpret_cast<char*>(&netLen), sizeof netLen, 0) };
+    ssize_t peeked = recv(m_socketfd, &netLen, PACKET_HEADER_SIZE, MSG_PEEK);
 
-    if (received == 0)
-    {
-        // Connection closed
+    if (peeked != PACKET_HEADER_SIZE)
         return std::nullopt;
-    }
 
-    if (received < 0)
-    {
-        // Error
+    // Payload    
+    uint32_t len = ntohl(netLen);
+
+    if (len > MAX_PACKET_SIZE)
         return std::nullopt;
-    }
 
-    // Payload
+    std::vector<char> buffer(PACKET_HEADER_SIZE + len);
     
-    uint32_t len{ ntohl(netLen) };
-    if (len == 0)
-    {
-        // Empty payload
-        return std::string{};
-    }
+    ssize_t received = recv(m_socketfd, buffer.data(), buffer.size(), 0);
 
-    std::string buffer(len, '\0');
-    received = recv_all(m_socketfd, buffer.data(), len, 0);
-    if (received <= 0)
-    {
+    if (received != static_cast<ssize_t>(buffer.size()))
         return std::nullopt;
-    }
 
-    return buffer;
+    return std::string(buffer.begin() + PACKET_HEADER_SIZE, buffer.end());
 }
+
+
 
 void NetworkSession::CloseSession()
 {
@@ -73,56 +109,4 @@ void NetworkSession::CloseSession()
         close(m_socketfd);
         m_socketfd = -1;
     }
-}
-
-int NetworkSession::GetSocket() const
-{
-    return m_socketfd;
-}
-
-ssize_t recv_all(int fd, char* buf, size_t bufSize, int flags)
-{
-    size_t totalReceived{ 0 };
-
-    while (totalReceived < bufSize)
-    {
-        ssize_t bytes{ recv(fd, buf + totalReceived, bufSize - totalReceived, flags) };
-        
-        if (bytes == 0)
-        {
-            break;
-        }
-
-        if (bytes < 0)
-        {
-            perror("recv error");
-            return -1;
-        }
-
-        totalReceived += bytes;
-    }
-
-    return totalReceived;
-}
-
-ssize_t send_all(int fd, char* buf, size_t bufSize, int flags)
-{
-    size_t totalSent{ 0 };
-
-    while (totalSent < bufSize)
-    {
-        ssize_t bytes{ send(fd, buf + totalSent, bufSize - totalSent, flags) };
-
-        if (bytes <= 0)
-        {
-            if (bytes < 0)
-                perror("send error");
-
-            return -1;
-        }
-
-        totalSent += bytes;
-    }
-
-    return totalSent;
 }

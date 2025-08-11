@@ -57,5 +57,5 @@ private:
     void HandleClientEvent(ClientInfo& client, uint32_t events);
     void BroadcastEncrypted(const std::string& msg);
     void DisconnectClient(ClientInfo& client);
-    bool SendSecretbox(NetworkSession* sess, const std::string& msg);
+    bool SendEncrypted(NetworkSession* sess, const std::string& msg);
 };

@@ -1,3 +1,22 @@
+# 0.4.3a - Refactor continued
+    OPTIMIZATIONS
+    [-] SendPacket and RecvPacket rewritten to use iov instead of strings, reducing the amount of copies
+    [-] SendPacket will now only send one packet instead of two per message, improving efficiency
+
+    CHANGES & QUALITY OF LIFE
+    [-] Deprecated send_all (see SendPacket)
+    [-] Deprecated recv_all (see RecvPacket)
+    [-] nodiscard attribute set for SendPacket and RecvPacket
+    [-] Further improved error handling to rely more on exceptions
+    [-] Improved logs
+    [-] The server will now properly memzero all stored keys
+    [-] The client will now properly memzero all stored keys
+    [-] Went through and made some things more readable for maintainability
+
+    BUG FIXES
+    [-] /exit will now properly exit on the client
+    [-] The server will now properly continue on a failed event instead of closing out entirely
+
 # 0.4.3 - Minor refactor
     CHANGES
     [-] Invalid usernames will no longer exit the program

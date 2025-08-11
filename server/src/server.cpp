@@ -9,6 +9,7 @@
 #include <sodium/crypto_box.h>
 #include <sodium/crypto_secretbox.h>
 #include <stdexcept>
+#include <string>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <iostream>
@@ -28,6 +29,8 @@ Server::Server(const uint16_t port)
 {
     if (sodium_init() < 0)
     {
+        Debug::Log("Unable to initialize libsodium", Debug::LOG_LEVEL::ERROR);
+        Debug::DumpToFile("serverlog.txt");
         std::cerr << "Unable to initialize libsodium\n";
         exit(1);
     }
@@ -65,7 +68,7 @@ void Server::SetupListener()
         m_listenfd = socket(AF_INET, SOCK_STREAM, 0);
         if (m_listenfd < 0)
         {
-            throw std::runtime_error("Failed to create socket");
+            throw std::runtime_error(std::string("Failed to create socket"));
         }
 
         std::cout << Style::style("PASS\n", {Style::STYLE_TYPE::GREEN, Style::STYLE_TYPE::BOLD});
@@ -82,11 +85,13 @@ void Server::SetupListener()
         std::cout << "==> Binding... ";
         if (bind(m_listenfd, (sockaddr*) &addr, sizeof addr) < 0)
         {
+            std::cout << '\n';
             throw std::runtime_error("Failed to bind socket");
         }
 
         if (listen(m_listenfd, SOMAXCONN) < 0)
         {
+            std::cout << '\n';
             throw std::runtime_error("Listen call failed on socket");
         }
 
@@ -94,37 +99,38 @@ void Server::SetupListener()
 
         SetNonBlocking(m_listenfd);
 
+        std::cout << Style::green("SOCKET CREATED\n");
 
-        std::cout << Style::style("STARTING EVENT HANDLER\n", {Style::STYLE_TYPE::RED});
+        std::cout << Style::yellow("STARTING EVENT HANDLER\n");
 
-        std::cout << "==> Setting up epoll... ";
+        std::cout << "==> Creating epoll... ";
         m_epollfd = epoll_create1(0);
 
         if (m_epollfd < 0)
         {
-            Debug::Log(strerror(errno), Debug::LOG_LEVEL::ERROR);
-            perror("epoll_create1()");
-            Stop(true);
-            return;
+            std::cout << '\n';
+            throw std::runtime_error("epoll_create() failed");
         }
+
+        std::cout << Style::style("PASS\n", {Style::STYLE_TYPE::GREEN, Style::STYLE_TYPE::BOLD});
+
+        std::cout << "==> Setting event hooks... ";
 
         epoll_event ev;
         ev.events = EPOLLIN;
         ev.data.fd = m_listenfd;
         if (epoll_ctl(m_epollfd, EPOLL_CTL_ADD, m_listenfd, &ev) < 0) 
         {
-            Debug::Log(std::string("epoll_ctl ADD listenfd failed: ") + strerror(errno));
-            perror("epoll_ctl()");
-            Stop(true);
-            return;
+            throw std::runtime_error("epoll_ctl ADD listenfd failed");
         }
 
         std::cout << Style::style("PASS\n", {Style::STYLE_TYPE::GREEN, Style::STYLE_TYPE::BOLD});
+        std::cout << Style::green("EVENT HANDLER STARTED\n");
     }
     catch (std::exception& e)
     {
-        Debug::Log(strerror(errno), Debug::LOG_LEVEL::ERROR);
-        std::cerr << "Exception thrown -> see logs for details\n";
+        Debug::Log(e.what() + std::string(": ") + strerror(errno), Debug::LOG_LEVEL::ERROR);
+        std::cerr << Style::red("Exception thrown -> see logs for details\n");
 
         if (m_listenfd != -1)
         {
@@ -151,7 +157,7 @@ void Server::Start()
         return;
     
     Debug::Log("Starting server...");
-    std::cout << Style::red("STARTING SERVER\n");
+    std::cout << Style::yellow("STARTING SERVER\n");
     m_running = true;
     SetupListener();
     EventLoop();
@@ -166,36 +172,47 @@ void Server::Stop(bool dumpLog)
 
 
     Debug::Log("Stopping server...");
-    std::cout << Style::style("STOPPING SERVER\n", {Style::STYLE_TYPE::BRIGHT_RED, Style::STYLE_TYPE::BOLD});
+    std::cout << Style::yellow("STOPPING SERVER\n");
     m_running = false;
 
     if (m_listenfd != -1)
     {
+        Debug::Log("==> Closing client socket");
         std::cout << "==> Closing client socket\n";
         shutdown(m_listenfd, SHUT_RDWR);
         close(m_listenfd);
         m_listenfd = -1;
-        Debug::Log("Client socket closed");
+        Debug::Log("==> Client socket closed");
         std::cout << "==> Client socket closed\n";
     }
 
     if (m_epollfd != -1)
     {
-        std::cout << "Stopping event handler...\n";
+        std::cout << Style::yellow("STOPPING EVENT HANDLER...\n");
+        Debug::Log("Stopping event handler...");
         close(m_epollfd);
         m_epollfd = -1;
         Debug::Log("Event handler stopped");
-        std::cout << "==> Event handler stopped\n";
+        std::cout << Style::red("EVENT HANDLER STOPPED\n");
     }
 
+    Debug::Log("Clearing keys...");
+    sodium_memzero(m_server_pk, sizeof m_server_pk);
     sodium_memzero(m_server_sk, sizeof m_server_sk);
     sodium_memzero(m_group_key, sizeof m_group_key);
+    Debug::Log("Keys cleared");
 
+    Debug::Log("Clearing clients...");
     {
         std::lock_guard<std::mutex> lock(m_clientsMutex);
         m_clients.clear();
         m_usernames.clear();
     }
+    Debug::Log("Clients cleared");
+
+
+    std::cout << Style::red("SERVER STOPPED\n");
+    Debug::Log("Server stopped");
 
     if (dumpLog)
         Debug::DumpToFile("serverlog.txt");
@@ -205,47 +222,59 @@ void Server::Stop(bool dumpLog)
 
 void Server::EventLoop()
 {
+
+    if (!m_running)
+        return;
+
     epoll_event events[MAX_EVENTS];
    
-    std::cout << Style::green("Server started\n");
-    std::cout << "Running on port " << m_port << '\n';
+    std::cout << Style::green("SERVER STARTED\n");
+    std::cout << "RUNNING ON PORT " << Style::yellow(std::to_string(m_port)) << '\n';
 
-    std::cout << Style::strikethrough("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~") << '\n';
+    Debug::Log("Server started on port " + std::to_string(m_port));
+
+    std::cout << "==========================================================\n";
 
     while (m_running)
     {
-        int n = epoll_wait(m_epollfd, events, MAX_EVENTS, -1);
-
-        if (n < 0)
+        try
         {
-            Debug::Log(strerror(errno), Debug::LOG_LEVEL::ERROR);
-            perror("epoll_wait()");
+            int n = epoll_wait(m_epollfd, events, MAX_EVENTS, -1);
+
+            if (n < 0)
+            {
+                throw std::runtime_error(std::string("epoll_wait() failed: ") + strerror(errno));
+            }
+
+            for (int i{ 0 }; i < n; i++)
+            {
+                int fd{ events[i].data.fd };
+
+                if (fd == m_listenfd)
+                    HandleNewConnection();
+                else
+                {
+                    std::unique_lock<std::mutex> lock(m_clientsMutex);
+                    auto it = m_clients.find(fd);
+
+                    if (it == m_clients.end())
+                    {
+                        lock.unlock();
+                        continue;
+                    }
+
+                    ClientInfo& clientRef = it->second;
+                    lock.unlock();
+
+                    HandleClientEvent(clientRef, events[i].events);
+                }
+            }
+        }
+        catch (std::exception& e)
+        {
+            Debug::Log(e.what(), Debug::LOG_LEVEL::ERROR);
             Stop(true);
             break;
-        }
-
-        for (int i{ 0 }; i < n; i++)
-        {
-            int fd{ events[i].data.fd };
-
-            if (fd == m_listenfd)
-                HandleNewConnection();
-            else
-            {
-                std::unique_lock<std::mutex> lock(m_clientsMutex);
-                auto it = m_clients.find(fd);
-
-                if (it == m_clients.end())
-                {
-                    lock.unlock();
-                    continue;
-                }
-
-                ClientInfo& clientRef = it->second;
-                lock.unlock();
-
-                HandleClientEvent(clientRef, events[i].events);
-            }
         }
     }
 }
@@ -264,7 +293,7 @@ void Server::HandleNewConnection()
                 return;
             else
             {
-                throw std::runtime_error(strerror(errno));
+                throw std::runtime_error(std::string("accept() failed: ") + strerror(errno));
                 return;
             }
         }
@@ -285,7 +314,7 @@ void Server::HandleNewConnection()
         if( epoll_ctl(m_epollfd, EPOLL_CTL_ADD, clientfd, &ev) < 0)
         {
             close(clientfd);
-            throw std::runtime_error(strerror(errno));
+            throw std::runtime_error(std::string("epoll_ctl() failed: ") + strerror(errno));
         }
 
         ClientInfo info;
@@ -350,13 +379,13 @@ void Server::HandleClientEvent(ClientInfo& client, uint32_t events)
 
         if (!pubkeyPkt)
         {
-            Debug::Log("Invalid public key", Debug::LOG_LEVEL::ERROR);
+            Debug::Log("Invalid client key", Debug::LOG_LEVEL::ERROR);
             return;
         }
 
         if (pubkeyPkt->size() != crypto_box_PUBLICKEYBYTES)
         {
-            Debug::Log("Public key has an invalid size", Debug::LOG_LEVEL::ERROR);
+            Debug::Log("Client key has an invalid size", Debug::LOG_LEVEL::ERROR);
             return;
         }
 
@@ -364,7 +393,12 @@ void Server::HandleClientEvent(ClientInfo& client, uint32_t events)
         
         // Send server public key
         std::string srvpk((char*) m_server_pk, crypto_box_PUBLICKEYBYTES);
-        client.session->SendPacket(srvpk);
+
+        if (!client.session->SendPacket(srvpk))
+        {
+            Debug::Log("Failed to send server key", Debug::LOG_LEVEL::ERROR);
+            return;
+        }
 
         // Encrypt the group key w/ client's pk
         unsigned char nonce[crypto_box_NONCEBYTES];
@@ -389,7 +423,11 @@ void Server::HandleClientEvent(ClientInfo& client, uint32_t events)
         std::string payload;
         payload.append((char*) nonce, crypto_box_NONCEBYTES);
         payload.append((char*) cipher.data(), cipher.size());
-        client.session->SendPacket(payload);
+        if (!client.session->SendPacket(payload))
+        {
+            Debug::Log("Failed to send payload", Debug::LOG_LEVEL::ERROR);
+            return;
+        }
 
         client.key_exchanged = true;
         return;
@@ -410,7 +448,7 @@ void Server::HandleClientEvent(ClientInfo& client, uint32_t events)
         if (rawPkt->size() < crypto_secretbox_NONCEBYTES)
         {
             Debug::Log("Username packet too small -> Dropping", Debug::LOG_LEVEL::WARNING);
-            SendSecretbox(client.session.get(), "SERVER::INVALID_USERNAME");
+            SendEncrypted(client.session.get(), "SERVER::INVALID_USERNAME");
             return;
         }
 
@@ -429,7 +467,7 @@ void Server::HandleClientEvent(ClientInfo& client, uint32_t events)
         {
             // Bad username packet
             Debug::Log("Invalid username packet -> Dropping", Debug::LOG_LEVEL::WARNING);
-            SendSecretbox(client.session.get(), "SERVER::USERNAME_INVALID");
+            SendEncrypted(client.session.get(), "SERVER::USERNAME_INVALID");
             return;
         }
 
@@ -442,7 +480,7 @@ void Server::HandleClientEvent(ClientInfo& client, uint32_t events)
             if (m_usernames.count(uname))
             {
                 Debug::Log("Username '" + uname + "' already taken -> Dropping", Debug::LOG_LEVEL::WARNING);
-                SendSecretbox(client.session.get(), "SERVER::USERNAME_TAKEN");
+                SendEncrypted(client.session.get(), "SERVER::USERNAME_TAKEN");
                 //DisconnectClient(client);
                 return;
             }
@@ -465,13 +503,17 @@ void Server::HandleClientEvent(ClientInfo& client, uint32_t events)
         if (!otherClient.registered)
             continue;
 
-        otherClient.session->SendPacket(*rawPkt);
+        if (!otherClient.session->SendPacket(*rawPkt))
+        {
+            Debug::Log("Failed to forward packet", Debug::LOG_LEVEL::ERROR);
+            continue;
+        }
     }
 }
 
 
 
-bool Server::SendSecretbox(NetworkSession* sess, const std::string& msg)
+bool Server::SendEncrypted(NetworkSession* sess, const std::string& msg)
 {
     unsigned char nonce[crypto_secretbox_NONCEBYTES];
     randombytes_buf(nonce, sizeof nonce);
@@ -518,10 +560,9 @@ void Server::BroadcastEncrypted(const std::string& msg)
 
         while (retries < 3)
         {
-            if (!SendSecretbox(client.session.get(), msg))
+            if (!SendEncrypted(client.session.get(), msg))
             {
                 retries++;
-                //std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // TODO separate threads because it holds back others as well
             }
             else
             {
