@@ -5,7 +5,7 @@
     IMPROVEMENTS
     [-] When starting the client, you can now specify -p/--port and -i/--ip. There is no longer a specific order and you no longer need to specify both
     [-] IP and port are now checked for invalid arguments, improving safety.
-
+    [-] Window resizing is now handled properly in the client
 
 # 0.4.3a - Refactor continued
     OPTIMIZATIONS

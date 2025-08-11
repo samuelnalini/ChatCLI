@@ -14,15 +14,17 @@ NcursesUI::NcursesUI()
 
 NcursesUI::~NcursesUI() {}
 
-void NcursesUI::Init()
+inline void NcursesUI::DrawWindows()
 {
-    setlocale(LC_ALL, "");
-    start_color();
-    initscr();
-    cbreak();
-    noecho();
-    keypad(stdscr, TRUE);
-    curs_set(1);
+    if (m_msgWin)
+    {
+        delwin(m_msgWin);
+    }
+
+    if (m_inputWin)
+    {
+        delwin(m_inputWin);
+    }
 
     getmaxyx(stdscr, m_rows, m_cols);
 
@@ -36,12 +38,42 @@ void NcursesUI::Init()
     nodelay(m_inputWin, TRUE);
     wtimeout(m_inputWin, 0);
 
-    init_pair(COLOR_RED, COLOR_BLACK, 1);
-    init_pair(COLOR_GREEN, COLOR_BLACK, 2);
-    init_pair(COLOR_BLUE, COLOR_BLACK, 3);
+    wrefresh(m_msgWin);
+    wrefresh(m_inputWin);
+}
+
+inline void NcursesUI::WindowResize()
+{
+    if (m_inputWin)
+    {
+        delwin(m_inputWin);
+    }
+
+    getmaxyx(stdscr, m_rows, m_cols);
+    redrawwin(m_msgWin);   
+
+    m_inputWin = newwin(INPUT_HEIGHT, m_cols, m_rows - INPUT_HEIGHT, 0);
+    box(m_inputWin, 0, 0);
+    keypad(m_inputWin, TRUE);
+    nodelay(m_inputWin, TRUE);
+    wtimeout(m_inputWin, 0);   
 
     wrefresh(m_msgWin);
     wrefresh(m_inputWin);
+}
+
+void NcursesUI::Init()
+{
+    setlocale(LC_ALL, "");
+    start_color();
+    initscr();
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+    curs_set(1);
+
+    DrawWindows();
+
     running = true;
 
     Debug::Log("UI Initialized");
@@ -51,8 +83,6 @@ void NcursesUI::Cleanup()
 {
     running = false;
     Debug::Log("Started UI cleanup procedure");
-
-    //FlushInput();
 
     if (m_msgWin)
     {
@@ -68,14 +98,6 @@ void NcursesUI::Cleanup()
 
     endwin();
     Debug::Log("==> Called endwin()");
-}
-
-void NcursesUI::FlushInput()
-{
-    wint_t ch;
-
-    while (wget_wch(m_inputWin, &ch) != ERR)
-    {} // Discard
 }
 
 bool NcursesUI::GetInputChar(wint_t& ch)
@@ -245,6 +267,9 @@ std::optional<std::string> NcursesUI::PromptInput(const std::string& prompt)
                 break;
             case KEY_END:
                 cursorPos = input.size();
+                break;
+            case KEY_RESIZE:
+                WindowResize();
                 break;
             default:
                 if (iswprint(ch))

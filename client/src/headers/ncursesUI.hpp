@@ -23,7 +23,8 @@ public:
     void PushPriorityMessage(const std::string& msg);
     void PrintBufferedMessages();
     void RedrawInputLine(const std::string& prompt, const std::wstring& inputBuffer, size_t cursorPos);
-    void FlushInput();
+    inline void DrawWindows();
+    inline void WindowResize();
 
     std::optional<std::string> PromptInput(const std::string& prompt);
 
