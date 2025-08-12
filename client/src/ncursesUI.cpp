@@ -14,20 +14,36 @@ NcursesUI::NcursesUI()
 
 NcursesUI::~NcursesUI() {}
 
+inline void NcursesUI::RedrawMessageHistory()
+{
+    werase(m_msgWin);
+   
+    int start{ std::max(0, (int) m_history.size() - m_rows) };
+    int line{ 0 };
+
+    for (int i{ start }; i < (int) m_history.size(); ++i)
+    {
+        mvwaddwstr(m_msgWin, line++, 0, m_history[i].c_str());
+    }
+
+    wrefresh(m_msgWin);
+}
+
 inline void NcursesUI::DrawWindows()
 {
-    if (m_msgWin)
+    if (m_msgWin != nullptr)
     {
         delwin(m_msgWin);
     }
 
-    if (m_inputWin)
+    if (m_inputWin != nullptr)
     {
         delwin(m_inputWin);
     }
 
     getmaxyx(stdscr, m_rows, m_cols);
-
+    
+    clear();
     m_msgWin = newwin(m_rows - INPUT_HEIGHT, m_cols, 0, 0) ;
     m_inputWin = newwin(INPUT_HEIGHT, m_cols, m_rows - INPUT_HEIGHT, 0);
 
@@ -40,27 +56,11 @@ inline void NcursesUI::DrawWindows()
 
     wrefresh(m_msgWin);
     wrefresh(m_inputWin);
+
+    RedrawMessageHistory();
 }
 
-inline void NcursesUI::WindowResize()
-{
-    if (m_inputWin)
-    {
-        delwin(m_inputWin);
-    }
 
-    getmaxyx(stdscr, m_rows, m_cols);
-    redrawwin(m_msgWin);   
-
-    m_inputWin = newwin(INPUT_HEIGHT, m_cols, m_rows - INPUT_HEIGHT, 0);
-    box(m_inputWin, 0, 0);
-    keypad(m_inputWin, TRUE);
-    nodelay(m_inputWin, TRUE);
-    wtimeout(m_inputWin, 0);   
-
-    wrefresh(m_msgWin);
-    wrefresh(m_inputWin);
-}
 
 void NcursesUI::Init()
 {
@@ -167,19 +167,28 @@ void NcursesUI::PrintBufferedMessages()
     bool printed{ false };
     while (!m_msgQueue.empty())
     {
-        std::string msg{ m_msgQueue.front() };
+        std::string msg = std::move(m_msgQueue.front());
         m_msgQueue.pop();
 
         std::wstring wmsg{ from_utf8(msg) };
-        wmsg.push_back(L'\n');
+
+        m_history.push_back(std::move(wmsg));
+        if (m_history.size() > NcursesUI::MAX_HISTORY)
+            m_history.pop_front();
+
+        
+        
+        /*wmsg.push_back(L'\n');
 
         mvwaddwstr(m_msgWin, getcury(m_msgWin), 0, wmsg.c_str());
+        Debug::Log("Printed message " + msg);*/
+
         printed = true;
-        Debug::Log("Printed message " + msg);
     }
 
     if (printed)
     {
+        RedrawMessageHistory();
         wrefresh(m_msgWin);
         wrefresh(m_inputWin);
     }
@@ -269,7 +278,7 @@ std::optional<std::string> NcursesUI::PromptInput(const std::string& prompt)
                 cursorPos = input.size();
                 break;
             case KEY_RESIZE:
-                WindowResize();
+                DrawWindows();
                 break;
             default:
                 if (iswprint(ch))
