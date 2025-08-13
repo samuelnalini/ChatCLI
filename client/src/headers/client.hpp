@@ -18,7 +18,7 @@ public:
     ~Client();
 
     void Start();
-    void Stop(bool dumpLog = false);
+    void Stop(const std::string exception = "");
 
 private:
     std::unique_ptr<NetworkSession> m_session;

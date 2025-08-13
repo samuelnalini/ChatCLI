@@ -1,6 +1,7 @@
 #include "headers/client.hpp"
 #include "debug.hpp"
 #include "common.hpp"
+#include "style.hpp"
 
 #include <chrono>
 #include <iostream>
@@ -25,7 +26,7 @@ Client::~Client()
     if (m_running)
     {
         m_exitReason = "Abrupt exit -> attempting graceful shutdown";
-        Stop(true);
+        Stop("Abrupt exit");
     }
 };
 
@@ -106,13 +107,13 @@ void Client::Start()
     {
         if (!CreateSession())
         {
-            throw std::runtime_error("Failed to create session -> stopping");
-            exit(1);
+            throw std::runtime_error("Failed to create session.");
         }
        
         m_uiActive = true;
         m_ui.Init();
        
+        Debug::Log("------------------------------------------------");
         Debug::Log("[*] Client started...");
 
         // Encryption Handshake
@@ -121,7 +122,7 @@ void Client::Start()
 
         if (!m_session->SendPacket(std::string((char*) m_client_pk, crypto_box_PUBLICKEYBYTES)))
         {
-            throw std::runtime_error("Bad handshake -> stopping");
+            throw std::runtime_error("Bad handshake");
         }
 
         // Receive server PK
@@ -144,26 +145,27 @@ void Client::Start()
             m_client_sk
         ) != 0)
         {
-            throw std::runtime_error("Invalid group key -> stopping");
+            throw std::runtime_error("Invalid group key");
         }
 
         // Username
 
         if(!ChangeUsername())
         {
-            throw std::runtime_error("Failed to set username. See logs for details.");
+            throw std::runtime_error("Failed to set username.");
         }
 
         m_running = true;
 
     } catch (const std::exception& e)
     {
-        m_exitReason = e.what();
         Debug::Log(std::string("Startup exception: ") + e.what(), Debug::LOG_LEVEL::ERROR);
         if (m_uiActive)
             m_ui.Cleanup();
 
-        Stop(true);
+        Stop(e.what());
+        std::cerr << Style::red(std::string("Startup exception: ") + e.what()) << '\n';
+        Debug::DumpToFile("client.log");
         exit(1);
 
     }
@@ -180,13 +182,13 @@ void Client::Start()
                 }
                 catch (const std::exception& e)
                 {
-                    Debug::Log((std::string("Exception in thread: ") + e.what()).c_str());
-                    Stop(true);
+                    Debug::Log((std::string("Exception in thread: ") + e.what()).c_str(), Debug::LOG_LEVEL::ERROR);
+                    Stop(e.what());
                 }
                 catch (...)
                 {
                     Debug::Log("Unknown exception in thread, stopping");
-                    Stop(true);
+                    Stop("Unknown exception");
                 }
             }
         );
@@ -201,14 +203,11 @@ void Client::Start()
 
     Debug::Log("Joining threads...");
 
-    int count{ 0 };
     for (auto &thr : m_threadPool)
     {
         if (thr.joinable())
         {
             thr.join();
-            Debug::Log("==> Thread " + std::to_string(count) + " joined");
-            count++;
         }
     }
 
@@ -219,20 +218,25 @@ void Client::Start()
 
     if (m_exitReason != "None")
     {
-        Debug::Log("Client exited: " + m_exitReason, Debug::LOG_LEVEL::INFO);
-        Debug::DumpToFile("log.txt");
-        std::cout << "Exited: " << m_exitReason << '\n';
+        Debug::Log("Client exited with exception: " + m_exitReason, Debug::LOG_LEVEL::INFO);
+        std::cerr << Style::red(std::string("Exited with exception: ") + m_exitReason) << '\n';
+        Debug::DumpToFile("client.log");
     }
 }
 
-void Client::Stop(bool)
+void Client::Stop(const std::string exception)
 {
     if (m_stopping)
     {
         return;
     }
 
-    Debug::Log("Initiating shutdown");
+    Debug::Log(std::string("Initiating shutdown") + (exception.empty() ? std::string("") : std::string(" with exception")));
+
+    if (!exception.empty())
+    {
+        m_exitReason = std::move(exception);
+    }
 
     m_stopping = true;
     m_running = false;
@@ -282,8 +286,7 @@ bool Client::CreateSession()
     }
     catch (const std::runtime_error& e)
     {
-        Debug::Log(e.what());
-        m_exitReason = e.what();
+        Debug::Log(e.what(), Debug::LOG_LEVEL::ERROR);
         return false;
     }
 }
@@ -341,7 +344,7 @@ std::optional<std::string> Client::RecvDecrypted()
 
     if (ctLen <= crypto_secretbox_MACBYTES)
     {
-        Debug::Log("Encrypted message too short for valid decryption");
+        Debug::Log("Encrypted message too short for valid decryption", Debug::LOG_LEVEL::ERROR);
         return std::nullopt;
     }
 
@@ -353,7 +356,7 @@ std::optional<std::string> Client::RecvDecrypted()
         m_group_key
     ) != 0)
     {
-        Debug::Log("Decryption failed: invalid ciphertext or tampering");
+        Debug::Log("Decryption failed: invalid ciphertext or tampering", Debug::LOG_LEVEL::ERROR);
         return std::nullopt;
     }
 
@@ -407,7 +410,7 @@ void Client::HandleBroadcast()
             if (!m_stopping)
             {
                 m_exitReason = "Server closed connection.";
-                Debug::Log("Server closed the connection");
+                Debug::Log("Server closed the connection", Debug::LOG_LEVEL::ERROR);
             }
             break;
         }
@@ -417,5 +420,5 @@ void Client::HandleBroadcast()
         m_ui.PushMessage(msg);
     }
 
-    Stop();
+    Stop(m_exitReason == "None" ? "" : m_exitReason);
 }

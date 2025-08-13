@@ -6,28 +6,17 @@
 
 Client* clientPtr;
 
-const std::vector<std::string> parseArgs(int argc, const char* argv[])
+[[nodiscard]]
+inline std::optional<uint16_t> checkPort(const std::string& portStr)
 {
-    std::vector<std::string> args;
-    
-    for (int i = 1; i < argc; i++)
-    {
-        args.push_back(argv[i]);
-    }
-
-    return args;
-}
-
-inline std::optional<uint16_t> checkPort(std::string& portStr)
-{
-    auto stoiPort = std::stoi(portStr);
+    const uint16_t stoiPort = std::stoi(portStr);
 
     if (!stoiPort)
     {
         return std::nullopt;
     }
 
-    if (stoiPort > 65535 || stoiPort <= 0)
+    if (stoiPort > 65535)
     {
         return std::nullopt;
     }
@@ -35,7 +24,8 @@ inline std::optional<uint16_t> checkPort(std::string& portStr)
     return stoiPort;
 }
 
-inline std::optional<std::string> checkIP(std::string& ipStr)
+[[nodiscard]]
+inline std::optional<std::string> checkIP(const std::string& ipStr)
 {
     std::regex ipv4("(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])");
 
@@ -45,19 +35,35 @@ inline std::optional<std::string> checkIP(std::string& ipStr)
     return ipStr;
 }
 
-bool setArgs(std::vector<std::string>& args, uint16_t& port, std::string& ip)
+bool setArgs(const std::vector<std::string>& args, uint16_t& port, std::string& ip)
 {
-    for (int i{ 0 }; i < args.size(); i++)
+    for (int i{1}; i < args.size(); i++)
     {
-        if (args[i] == "-p" || args[i] == "--port")
+
+        if (args[i].at(0) != '-')
         {
-            if (args.size() < (i + 1))
+             // Assume ip
+            auto ipCheck = checkIP(args[i]);
+
+            if (!ipCheck.has_value())
             {
-                std::cerr << "Usage: -p/--port <num>\n";
+                std::cerr << "Invalid IP \"" << args[i] << "\"\n";
                 return false;
             }
 
-            auto portCheck = checkPort(args[i + 1]);
+            ip = ipCheck.value();
+            continue;
+        }
+
+        if (args.size() < (i + 1))
+        {
+            std::cerr << "Usage: client -i/--ip <ipv4> -p/--port <num>\n";
+            return false;
+        }
+
+        if (args[i] == "-p" || args[i] == "--port")
+        {
+            const std::optional<uint16_t> portCheck = checkPort(args[i + 1]);
 
             if (!portCheck.has_value())
             {
@@ -67,33 +73,16 @@ bool setArgs(std::vector<std::string>& args, uint16_t& port, std::string& ip)
 
             port = portCheck.value();
             i++;
+            continue;
         }
-        else if (args[i] == "-i" || args[i] == "--ip")
+        
+        if (args[i] == "-i" || args[i] == "--ip")
         {
-            if (args.size() < (i + 1))
-            {
-                std::cerr << "Usage: -i/--ip <num>\n";
-                return false;
-            }
-
-            auto ipCheck = checkIP(args[i + 1]);
+            const std::optional<std::string> ipCheck = checkIP(args[i + 1]);
 
             if (!ipCheck.has_value())
             {
                 std::cerr << "Invalid IP \"" << args[i + 1] << "\"\n";
-                return false;
-            }
-
-            ip = ipCheck.value();
-        }
-        else
-        {
-            // Assume ip
-            auto ipCheck = checkIP(args[i]);
-
-            if (!ipCheck.has_value())
-            {
-                std::cerr << "Invalid IP \"" << args[i] << "\"\n";
                 return false;
             }
 
@@ -109,7 +98,8 @@ int main(int argc, const char* argv[])
     uint16_t port{ 8080 };
     std::string ip{ "127.0.0.1" };
 
-    std::vector<std::string> args = parseArgs(argc, argv); // convert argv into a vector, probably should optimize later
+    std::vector<std::string> args;
+    args.assign(argv, argv + argc);
 
     setArgs(args, port, ip);
 

@@ -75,8 +75,6 @@ void NcursesUI::Init()
     DrawWindows();
 
     running = true;
-
-    Debug::Log("UI Initialized");
 }
 
 void NcursesUI::Cleanup()
@@ -175,13 +173,6 @@ void NcursesUI::PrintBufferedMessages()
         m_history.push_back(std::move(wmsg));
         if (m_history.size() > NcursesUI::MAX_HISTORY)
             m_history.pop_front();
-
-        
-        
-        /*wmsg.push_back(L'\n');
-
-        mvwaddwstr(m_msgWin, getcury(m_msgWin), 0, wmsg.c_str());
-        Debug::Log("Printed message " + msg);*/
 
         printed = true;
     }

@@ -1,7 +1,5 @@
 #pragma once
 
-#include "debug.hpp"
-
 #include <ncurses.h>
 #include <string>
 #include <mutex>

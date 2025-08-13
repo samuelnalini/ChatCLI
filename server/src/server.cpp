@@ -30,7 +30,7 @@ Server::Server(const uint16_t port)
     if (sodium_init() < 0)
     {
         Debug::Log("Unable to initialize libsodium", Debug::LOG_LEVEL::ERROR);
-        Debug::DumpToFile("serverlog.txt");
+        Debug::DumpToFile("server.log");
         std::cerr << "Unable to initialize libsodium\n";
         exit(1);
     }
@@ -68,7 +68,7 @@ void Server::SetupListener()
         m_listenfd = socket(AF_INET, SOCK_STREAM, 0);
         if (m_listenfd < 0)
         {
-            throw std::runtime_error(std::string("Failed to create socket"));
+            throw std::runtime_error("Failed to create socket");
         }
 
         std::cout << Style::style("PASS\n", {Style::STYLE_TYPE::GREEN, Style::STYLE_TYPE::BOLD});
@@ -215,7 +215,7 @@ void Server::Stop(bool dumpLog)
     Debug::Log("Server stopped");
 
     if (dumpLog)
-        Debug::DumpToFile("serverlog.txt");
+        Debug::DumpToFile("server.log");
 }
 
 
@@ -582,7 +582,7 @@ void Server::BroadcastEncrypted(const std::string& msg)
         if (it == m_clients.end())
             continue;
 
-        Debug::Log(it->second.username + " out of sync -> Disconnecting");
+        Debug::Log(it->second.username + " out of sync -> Disconnecting", Debug::LOG_LEVEL::WARNING);
         DisconnectClient(it->second);
     }
 }

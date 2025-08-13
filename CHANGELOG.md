@@ -1,3 +1,14 @@
+# 0.4.4 - Exception improvements
+    OPTIMIZATIONS
+    [-] Made use of vector.assign in client/main.cpp, removing an unnecessary function
+
+    IMPROVEMENTS
+    [-] Exception handling has been improved
+    [-] More descriptive error messages
+    [-] Further improved debug logging
+    [-] serverlog.txt and log.txt are now server.log and client.log
+    [-] Changed the way clients handle exceptions, Stop() now takes in a std::string exception and sets the exit reason.
+
 # 0.4.3b - Quality of life
     OPTIMIZATIONS
     [-] Completely removed deprecated send_all and recv_all to save some memory
