@@ -162,3 +162,5 @@ The contents of client.log are similar to those of the server's log. It will con
 >  - Development in Linux
 >  - Error handling through the use of try/catch blocks, exception handling
 >  - Some regex magic
+ 
+As of right now, the plan is to recreate this application in C, which will allow for greater control.
