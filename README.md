@@ -163,4 +163,4 @@ The contents of client.log are similar to those of the server's log. It will con
 >  - Error handling through the use of try/catch blocks, exception handling
 >  - Some regex magic
  
-As of right now, the plan is to recreate this application in C, which will allow for greater control.
+As of right now, the plan is to recreate this with a proper UI for both the server and the client. The logic will also be ported to C while the UI will remain in C++. This will likely be done in a separate repository.
